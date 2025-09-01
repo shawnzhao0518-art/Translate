@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Shawn 的翻译主页</title>
+  <style>
+    :root { --w: 92vw; max-width: 900px; }
+    body { font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,Helvetica,sans-serif; 
+           margin: 24px; display: flex; justify-content: center; }
+    .wrap { width: min(var(--w), 900px); }
+    h2 { text-align: center; margin: 0 0 12px; }
+    .bar { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; align-items:center; }
+    select,button,input[type=file]{ padding:10px 14px; font-size:16px; }
+    textarea { width: 100%; height: 140px; margin: 12px 0; padding: 12px; font-size: 16px; line-height: 1.4; }
+    #result { margin-top: 16px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; 
+              font-size: 18px; color: #0a3a8d; background:#f7f9ff; min-height: 48px; }
+    .hint { color:#666; font-size:13px; text-align:center; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h2>🌐 Shawn 的翻译主页</h2>
+
+    <div class="bar">
+      <label for="langSelect">选择翻译方向：</label>
+      <select id="langSelect" aria-label="翻译方向">
+        <option value="zh|en">中文 → 英文</option>
+        <option value="en|zh">英文 → 中文</option>
+      </select>
+      <button onclick="translateText()">翻译文字</button>
+      <button onclick="startSpeech()">🎤 语音输入</button>
+      <input type="file" accept="image/*" onchange="handleImage(this)" title="拍照/上传图片进行文字识别"/>
+    </div>
+
+    <textarea id="inputText" placeholder="在这里输入要翻译的文字，或使用语音/拍照识别…"></textarea>
+
+    <div id="result" role="status" aria-live="polite">翻译结果将显示在这里</div>
+    <div class="hint">提示：语音输入依赖浏览器的 Web Speech API；拍照翻译使用 OCR.Space 的公开示例接口。</div>
+  </div>
+
+  <script>
+    // 简单的防抖
+    let translating = false;
+
+    // 文字翻译（Google Translate 非官方 Web 接口，仅作演示）
+    async function translateText(text) {
+      try {
+        if (translating) return;
+        translating = true;
+
+        let q = document.getElementById('inputText').value.trim();
+        if (text) q = text.trim();
+        if (!q) { show('请输入内容'); translating = false; return; }
+
+        // 读取语言方向
+        const [from, to] = document.getElementById('langSelect').value.split('|');
+
+        // 发起请求
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${from}&tl=${to}&dt=t&q=${encodeURIComponent(q)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('网络错误：' + res.status);
+        const data = await res.json();
+
+        // 组装多段结果
+        const parts = data[0].map(seg => seg[0]).join('');
+        show(parts || '（无结果）');
+      } catch (e) {
+        show('翻译失败：' + e.message);
+      } finally {
+        translating = false;
+      }
+    }
+
+    function show(msg){ document.getElementById('result').innerText = msg; }
+
+    // 语音输入
+    function startSpeech() {
+      const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!Speech) { alert('当前浏览器不支持语音识别'); return; }
+
+      // 根据方向自动设置识别语言
+      const [from] = document.getElementById('langSelect').value.split('|');
+      const langMap = { zh: 'zh-CN', en: 'en-US' };
+
+      const r = new Speech();
+      r.lang = langMap[from] || 'zh-CN';
+      r.interimResults = false;
+      r.maxAlternatives = 1;
+      r.start();
+      r.onresult = e => {
+        const text = e.results[0][0].transcript;
+        document.getElementById('inputText').value = text;
+        translateText(text);
+      };
+      r.onerror = e => alert('语音识别出错：' + (e.error || 'unknown'));
+    }
+
+    // 图片 OCR + 翻译（OCR.Space Demo Key，仅作演示）
+    async function handleImage(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+
+      try {
+        show('正在识别图片文字…');
+        const fd = new FormData();
+        fd.append('apikey', 'helloworld'); // Demo key：速率和配额有限
+        fd.append('file', file);
+        // 语言选择根据当前 from 语言来设置更合理的 OCR 语言
+        const [from] = document.getElementById('langSelect').value.split('|');
+        const ocrLang = (from === 'en') ? 'eng' : 'chs';
+        fd.append('language', ocrLang);
+
+        const res = await fetch('https://api.ocr.space/parse/image', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!data.ParsedResults || !data.ParsedResults[0]) throw new Error('未识别到文字');
+        const text = data.ParsedResults[0].ParsedText || '';
+        document.getElementById('inputText').value = text.trim();
+        translateText(text);
+      } catch (e) {
+        show('识别失败：' + e.message);
+      } finally {
+        // 清空 input 以便下次选择同一文件也会触发 change
+        input.value = '';
+      }
+    }
+  </script>
+</body>
+</html>
